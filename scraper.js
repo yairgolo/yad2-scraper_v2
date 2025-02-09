@@ -27,21 +27,30 @@ const scrapeItemsAndExtractImgUrls = async (url) => {
     if (titleText === "ShieldSquare Captcha") {
         throw new Error("Bot detection");
     }
-    const $feedItems = $(".feeditem").find(".pic");
+    const $feedItems = $("div[class^=results-feed_feedListBox]");
     if (!$feedItems) {
         throw new Error("Could not find feed items");
     }
-    const imageUrls = []
-    $feedItems.each((_, elm) => {
-        const imgSrc = $(elm).find("img").attr('src');
-        if (imgSrc) {
-            imageUrls.push(imgSrc)
+    const $imageList = $feedItems.find("div[class^=feed-item-base_imageBox]");
+    const $linkList = $feedItems.find("div[class^=feed-item-base_feedItemBox]");
+
+    if ($imageList.length != $linkList.length) {
+        throw new Error(`Could not read lists properly`);
+    }
+
+    const data = []
+    $imageList.each((i, _) => {
+        const imgSrc = $($imageList[i]).find("img").attr('src');
+        const lnkSrc = $($linkList[i]).find("a").attr('href');
+
+        if (imgSrc && lnkSrc) {
+            data.push({'img':imgSrc, 'lnk':  new URL(lnkSrc, url).href})
         }
     })
-    return imageUrls;
+    return data;
 }
 
-const checkIfHasNewItem = async (imgUrls, topic) => {
+const checkIfHasNewItem = async (data, topic) => {
     const filePath = `./data/${topic}.json`;
     let savedUrls = [];
     try {
@@ -56,15 +65,16 @@ const checkIfHasNewItem = async (imgUrls, topic) => {
         }
     }
     let shouldUpdateFile = false;
+    let imgUrls = data.map(a => a['img']);
     savedUrls = savedUrls.filter(savedUrl => {
         shouldUpdateFile = true;
         return imgUrls.includes(savedUrl);
     });
     const newItems = [];
-    imgUrls.forEach(url => {
-        if (!savedUrls.includes(url)) {
-            savedUrls.push(url);
-            newItems.push(url);
+    data.forEach(url => {
+        if (!savedUrls.includes(url['img'])) {
+            savedUrls.push(url['img']);
+            newItems.push(url['lnk']);
             shouldUpdateFile = true;
         }
     });
@@ -86,12 +96,12 @@ const scrape = async (topic, url) => {
     const telenode = new Telenode({apiToken})
     try {
         await telenode.sendTextMessage(`Starting scanning ${topic} on link:\n${url}`, chatId)
-        const scrapeImgResults = await scrapeItemsAndExtractImgUrls(url);
-        const newItems = await checkIfHasNewItem(scrapeImgResults, topic);
+        const scrapeDataResults = await scrapeItemsAndExtractImgUrls(url);
+        const newItems = await checkIfHasNewItem(scrapeDataResults, topic);
         if (newItems.length > 0) {
-            const newItemsJoined = newItems.join("\n----------\n");
-            const msg = `${newItems.length} new items:\n${newItemsJoined}`
-            await telenode.sendTextMessage(msg, chatId);
+            await telenode.sendTextMessage(`${newItems.length} new items`, chatId)
+            .then(Promise.all(
+                newItems.map(msg => telenode.sendTextMessage(msg, chatId))));
         } else {
             await telenode.sendTextMessage("No new items were added", chatId);
         }
