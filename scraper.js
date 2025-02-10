@@ -67,7 +67,6 @@ const checkIfHasNewItem = async (data, topic) => {
     let shouldUpdateFile = false;
     let imgUrls = data.map(a => a['img']);
     savedUrls = savedUrls.filter(savedUrl => {
-        shouldUpdateFile = true;
         return imgUrls.includes(savedUrl);
     });
     const newItems = [];
