@@ -16,6 +16,18 @@ const getYad2Response = async (url) => {
     }
 }
 
+const types = {
+    CARS: 'cars',
+    NADLAN: 'nadlan',
+    UNKNOWN: 'x'
+};
+
+const stages = {
+    [types.CARS]: ["div[class^=results-feed_feedListBox]", "div[class^=feed-item-base_imageBox]", "div[class^=feed-item-base_feedItemBox]"],
+    [types.NADLAN]: ["div[class^=map-feed_mapFeedBox]", "div[class^=item-image_itemImageBox]", "div[class^=item-layout_feedItemBox]"],
+    [types.UNKNOWN]: []
+};
+
 const scrapeItemsAndExtractImgUrls = async (url) => {
     const yad2Html = await getYad2Response(url);
     if (!yad2Html) {
@@ -27,14 +39,24 @@ const scrapeItemsAndExtractImgUrls = async (url) => {
     if (titleText === "ShieldSquare Captcha") {
         throw new Error("Bot detection");
     }
-    const $feedItems = $("div[class^=results-feed_feedListBox]");
-    if (!$feedItems) {
+
+    let type = types.UNKNOWN;
+    if ($("div[class^=results-feed_feedListBox]").length != 0) {
+        type = types.CARS;
+    } else if ($("div[class^=map-feed_mapFeedBox]").length != 0) {
+        type = types.NADLAN;
+    } else {
+        throw new Error("Unknown type");
+    }
+
+    const $feedItems = $(stages[type][0]);
+    if ($feedItems.length == 0) {
         throw new Error("Could not find feed items");
     }
-    const $imageList = $feedItems.find("div[class^=feed-item-base_imageBox]");
-    const $linkList = $feedItems.find("div[class^=feed-item-base_feedItemBox]");
+    const $imageList = $feedItems.find(stages[type][1]);
+    const $linkList = $feedItems.find(stages[type][2]);
 
-    if ($imageList.length != $linkList.length) {
+    if ($imageList == 0 || $imageList.length != $linkList.length) {
         throw new Error(`Could not read lists properly`);
     }
 
