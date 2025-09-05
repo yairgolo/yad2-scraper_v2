@@ -32,8 +32,11 @@ jobs:
 
       - name: Run scraper
         env:
-          API_TOKEN: ${{ secrets.API_TOKEN }}
-          CHAT_ID: ${{ secrets.CHAT_ID }}
+          API_TOKEN: ${{ secrets.API_TOKEN }}      # BotFather token
+          CHAT_ID:   ${{ secrets.CHAT_ID }}        # chat/group id
+          HTTPS_PROXY: ${{ secrets.HTTPS_PROXY }}  # אופציונלי: פרוקסי רזידנטי
+          HEADLESS: "true"
+          MAX_RETRIES: "3"
         run: yarn scrape
 
       - name: Push new json data if needed
