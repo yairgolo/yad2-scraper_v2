@@ -1,6 +1,7 @@
 {
   "telegramApiToken": null,
   "chatId": null,
+  "cookies": "",
   "projects": [
     {
       "topic": "Skoda_Octavia",
