@@ -2,8 +2,8 @@ name: Yad2 Scraper
 
 on:
   schedule:
-    - cron: '*/15 5-17 * * *'   # כל 15 דק' 05:00-17:59 UTC
-    - cron: '*/30 17-20 * * *'  # כל 30 דק' 17:00-20:59 UTC
+    - cron: '*/15 5-17 * * *'   # כל 15 דק' 05:00–17:59 UTC
+    - cron: '*/30 17-20 * * *'  # כל 30 דק' 17:00–20:59 UTC
   workflow_dispatch:
     branches:
       - '**'
