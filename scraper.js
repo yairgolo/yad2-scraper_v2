@@ -1,29 +1,23 @@
 // --- deps ---
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+puppeteer.use(StealthPlugin());
+
 const cheerio = require('cheerio');
 const Telenode = require('telenode-js');
 const fs = require('fs');
 const path = require('path');
 
-// --- config ---
-let config = { telegramApiToken: "", chatId: 0, cookies: "", projects: [] };
-try {
-  const raw = fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8');
-  config = JSON.parse(raw);
-} catch (e) {
-  console.warn('No config.json found or invalid JSON. Falling back to env only.');
-}
+// --- helpers ---
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const rand = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
 
-// --- constants ---
-const DEFAULT_UA =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
+const DEFAULT_UA_BASE =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/';
+const DEFAULT_UA_TAIL = '.0 Safari/537.36';
+const buildUA = () => `${DEFAULT_UA_BASE}${rand(120, 127)}${DEFAULT_UA_TAIL}`;
 
-const types = {
-  CARS: 'cars',
-  NADLAN: 'nadlan',
-  UNKNOWN: 'x'
-};
-
+const types = { CARS: 'cars', NADLAN: 'nadlan', UNKNOWN: 'x' };
 const stages = {
   [types.CARS]: [
     "div[class^=results-feed_feedListBox]",
@@ -38,27 +32,31 @@ const stages = {
   [types.UNKNOWN]: []
 };
 
-// --- utils ---
-const ensureDataDir = () => fs.mkdirSync(path.join(__dirname, 'data'), { recursive: true });
+// --- config ---
+let config = { telegramApiToken: "", chatId: 0, cookies: "", projects: [] };
+try {
+  config = JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8'));
+} catch {
+  console.warn('No config.json found or invalid JSON. Falling back to env only.');
+}
+
+// --- FS utils ---
+const dataDir = path.join(__dirname, 'data');
+const ensureDataDir = () => fs.mkdirSync(dataDir, { recursive: true });
 
 const loadSavedUrls = (topic) => {
   ensureDataDir();
-  const filePath = path.join(__dirname, 'data', `${topic}.json`);
+  const filePath = path.join(dataDir, `${topic}.json`);
   if (!fs.existsSync(filePath)) {
     fs.writeFileSync(filePath, '[]');
     return [];
   }
   const txt = fs.readFileSync(filePath, 'utf8');
-  try {
-    return JSON.parse(txt || '[]');
-  } catch (e) {
-    console.error(`Failed reading ${filePath}`, e);
-    throw new Error(`Could not read ${filePath}`);
-  }
+  return JSON.parse(txt || '[]');
 };
 
 const saveUrls = (topic, urls) => {
-  const filePath = path.join(__dirname, 'data', `${topic}.json`);
+  const filePath = path.join(dataDir, `${topic}.json`);
   fs.writeFileSync(filePath, JSON.stringify(urls, null, 2));
 };
 
@@ -66,51 +64,57 @@ const createPushFlagForWorkflow = () => {
   fs.writeFileSync(path.join(__dirname, 'push_me'), '');
 };
 
-// --- network ---
+// --- network (Puppeteer + stealth + optional proxy/cookies) ---
 async function getYad2HtmlWithPuppeteer(url, cookiesCfg) {
+  const args = [
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage'
+  ];
+  const proxy = process.env.HTTP_PROXY || process.env.HTTPS_PROXY || '';
+  if (proxy) args.push(`--proxy-server=${proxy}`);
+
   const browser = await puppeteer.launch({
-    headless: 'new',
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage'
-    ]
+    headless: process.env.HEADLESS === 'false' ? false : 'new',
+    args
   });
 
   try {
     const page = await browser.newPage();
-    await page.setUserAgent(DEFAULT_UA);
+    await page.setUserAgent(buildUA());
+    await page.setViewport({ width: 1366, height: 840 });
     await page.setExtraHTTPHeaders({
       'Accept-Language': 'he-IL,he;q=0.9,en-US;q=0.8,en;q=0.7',
       'Upgrade-Insecure-Requests': '1'
     });
 
-    // הזרקת קוקיז (אם הוגדרו)
-    if (cookiesCfg) {
-      if (typeof cookiesCfg === 'string' && cookiesCfg.trim()) {
-        await page.setExtraHTTPHeaders({ Cookie: cookiesCfg.trim() });
-      } else if (Array.isArray(cookiesCfg) && cookiesCfg.length) {
-        await page.setCookie(...cookiesCfg);
-      }
+    // Cookie string פשוטה (אם הוגדרה)
+    if (cookiesCfg && typeof cookiesCfg === 'string' && cookiesCfg.trim()) {
+      await page.setExtraHTTPHeaders({ Cookie: cookiesCfg.trim() });
     }
 
+    // 1) דף הבית (לאסוף קוקיז בסיסיים)
+    await page.goto('https://www.yad2.co.il/', { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await sleep(rand(800, 1600));
+
+    // 2) דף החיפוש
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
-    const title = await page.title();
+    let title = await page.title();
     if (title.includes('ShieldSquare')) {
-      throw new Error('Bot detection');
+      await sleep(rand(900, 1800));
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      title = await page.title();
+      if (title.includes('ShieldSquare')) throw new Error('Bot detection');
     }
 
-    // המתנה קטנה לרינדור lazy
-    await page.waitForTimeout(1200);
+    await sleep(rand(900, 1800)); // lazy
 
-    // ניסיון נוסף קצר אם הקונטיינר טרם הופיע
+    // וידוא הופעת הפיד
     const hasFeed =
       (await page.$(stages[types.CARS][0])) ||
       (await page.$(stages[types.NADLAN][0]));
-    if (!hasFeed) {
-      await page.waitForTimeout(1200);
-    }
+    if (!hasFeed) await sleep(rand(800, 1600));
 
     return await page.content();
   } finally {
@@ -125,7 +129,7 @@ const scrapeItemsAndExtractImgUrls = async (url) => {
 
   const $ = cheerio.load(yad2Html);
   const titleText = $('title').first().text().trim();
-  if (titleText === 'ShieldSquare Captcha') throw new Error('Bot detection');
+  if (titleText.includes('ShieldSquare')) throw new Error('Bot detection');
 
   let type = types.UNKNOWN;
   if ($(stages[types.CARS][0]).length) type = types.CARS;
@@ -172,7 +176,7 @@ const checkIfHasNewItem = async (data, topic) => {
   let savedUrls = loadSavedUrls(topic);
   const currentImgUrls = data.map(d => d.img);
 
-  // השאר רק מה שעדיין קיים
+  // שמור רק פריטים שעדיין קיימים
   savedUrls = savedUrls.filter(u => currentImgUrls.includes(u));
 
   const newItems = [];
@@ -191,51 +195,61 @@ const checkIfHasNewItem = async (data, topic) => {
   return newItems;
 };
 
-// --- main scraper ---
+// --- main (with retries) ---
+async function scrapeOnce(topic, url, telenode, chatId) {
+  const scrapeData = await scrapeItemsAndExtractImgUrls(url);
+  const newItems = await checkIfHasNewItem(scrapeData, topic);
+
+  if (newItems.length > 0) {
+    await telenode.sendTextMessage(`${newItems.length} new items for "${topic}"`, chatId);
+    await Promise.all(newItems.map(msg => telenode.sendTextMessage(msg, chatId)));
+  }
+}
+
+async function scrapeWithRetry(topic, url, telenode, chatId) {
+  const retries = parseInt(process.env.MAX_RETRIES || '3', 10);
+  let attempt = 0;
+  while (true) {
+    try {
+      await scrapeOnce(topic, url, telenode, chatId);
+      return; // success
+    } catch (e) {
+      attempt++;
+      const isLast = attempt >= retries;
+      const delay = rand(1500 * attempt, 3000 * attempt);
+      const msg = `Attempt ${attempt}/${retries} failed for "${topic}": ${e?.message || e}`;
+
+      console.error(msg);
+      // שליחת עדכון רק בכישלון האחרון כדי לא להציף
+      if (isLast) {
+        try { await telenode.sendTextMessage(`Scan failed for "${topic}" 😥\n${e?.message || 'unknown'}`, chatId); } catch {}
+        throw e;
+      }
+      await sleep(delay);
+    }
+  }
+}
+
 const scrape = async (topic, url) => {
   const apiToken = process.env.API_TOKEN || config.telegramApiToken;
   const chatId = process.env.CHAT_ID || config.chatId;
   if (!apiToken || !chatId) throw new Error('Missing Telegram credentials (API_TOKEN / CHAT_ID).');
 
   const telenode = new Telenode({ apiToken });
-
-  try {
-    const scrapeData = await scrapeItemsAndExtractImgUrls(url);
-    const newItems = await checkIfHasNewItem(scrapeData, topic);
-
-    if (newItems.length > 0) {
-      await telenode.sendTextMessage(`${newItems.length} new items for "${topic}"`, chatId);
-      await Promise.all(newItems.map(msg => telenode.sendTextMessage(msg, chatId)));
-    }
-  } catch (e) {
-    const errMsg = e?.message ? `Error: ${e.message}` : 'Unknown error';
-    try {
-      await telenode.sendTextMessage(`Scan workflow failed for "${topic}" 😥\n${errMsg}`, chatId);
-    } catch (_) {}
-    throw e;
-  }
+  await scrapeWithRetry(topic, url, telenode, chatId);
 };
 
 // --- entrypoint ---
-const program = async () => {
+(async function program() {
   ensureDataDir();
 
-  const activeProjects = (config.projects || []).filter(p => {
-    if (p.disabled) {
-      console.log(`Topic "${p.topic}" is disabled. Skipping.`);
-    }
-    return !p.disabled;
-  });
-
+  const activeProjects = (config.projects || []).filter(p => !p.disabled);
   if (!activeProjects.length) {
     console.log('No active projects to run.');
     return;
   }
-
   await Promise.all(activeProjects.map(p => scrape(p.topic, p.url)));
-};
-
-program().catch(err => {
+})().catch(err => {
   console.error(err);
   process.exit(1);
 });
