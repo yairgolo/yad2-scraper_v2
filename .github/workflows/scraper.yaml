@@ -2,8 +2,8 @@ name: Yad2 Scraper
 
 on:
   schedule:
-    - cron: '*/15 5-17 * * *'
-    - cron: '*/30 17-20 * * *'
+    - cron: '*/15 5-17 * * *'   # כל 15 דק' 05:00-17:59 UTC
+    - cron: '*/30 17-20 * * *'  # כל 30 דק' 17:00-20:59 UTC
   workflow_dispatch:
     branches:
       - '**'
@@ -15,10 +15,15 @@ jobs:
       contents: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
 
       - name: Install packages
-        run: yarn install
+        run: yarn install --frozen-lockfile || yarn install
 
       - name: Setup git config
         run: |
@@ -26,10 +31,10 @@ jobs:
           git config user.email "${{ secrets.GIT_CONFIG_EMAIL }}"
 
       - name: Run scraper
-        run: |
-          export API_TOKEN=${{ secrets.API_TOKEN }}
-          export CHAT_ID=${{ secrets.CHAT_ID }}
-          yarn scrape
+        env:
+          API_TOKEN: ${{ secrets.API_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: yarn scrape
 
       - name: Push new json data if needed
         run: |
