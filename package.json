@@ -1,8 +1,8 @@
 {
   "name": "yad2-cars-scraper",
-  "version": "2.2.0",
+  "version": "3.0.0",
   "private": true,
-  "description": "Scraper for Yad2 car searches with Telegram notifications and GitHub Actions scheduling (Puppeteer-based).",
+  "description": "Robust Yad2 cars scraper with Telegram notifications and GitHub Actions (Puppeteer + Stealth + Retry).",
   "main": "scraper.js",
   "scripts": {
     "scrape": "node scraper.js",
@@ -14,6 +14,8 @@
   "dependencies": {
     "cheerio": "^1.0.0-rc.12",
     "puppeteer": "^22.13.1",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
     "telenode-js": "^1.3.0"
   }
 }
